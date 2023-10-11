@@ -1,7 +1,6 @@
 import os
 from dotenv import load_dotenv
 
-import streamlit as st
 from langchain import PromptTemplate
 from langchain.agents import initialize_agent, Tool
 from langchain.agents import AgentType
@@ -16,9 +15,8 @@ from typing import Type
 from bs4 import BeautifulSoup
 import requests
 import json
-import pdfminer
 from langchain.schema import SystemMessage
-#from fastapi import FastAPI
+from fastapi import FastAPI
 
 load_dotenv()
 brwoserless_api_key = os.getenv("BROWSERLESS_API_KEY")
@@ -47,55 +45,46 @@ def search(query):
 
 
 # 2. Tool for scraping
-# Modified code with PDF scraping capability
 def scrape_website(objective: str, url: str):
-    """
-    Scrape website and also will summarize the content based on objective if the content is too large.
-    Objective is the original objective & task that user give to the agent, url is the url of the website to be scraped.
-    """
+    # scrape website, and also will summarize the content based on objective if the content is too large
+    # objective is the original objective & task that user give to the agent, url is the url of the website to be scraped
+
     print("Scraping website...")
+    # Define the headers for the request
+    headers = {
+        'Cache-Control': 'no-cache',
+        'Content-Type': 'application/json',
+    }
 
-    # Check if the URL points to a PDF
-    if url.lower().endswith('.pdf'):
-        # Download the PDF
-        response = requests.get(url)
-        with open("/tmp/temp.pdf", "wb") as f:
-            f.write(response.content)
+    # Define the data to be sent in the request
+    data = {
+        "url": url
+    }
 
-        # Extract text from the PDF using pdfminer
-        from pdfminer.high_level import extract_text
-        text = extract_text("/tmp/temp.pdf")
-    else:
-        # Existing logic for non-PDF URLs
-        headers = {
-            'Cache-Control': 'no-cache',
-            'Content-Type': 'application/json',
-        }
-        data = {"url": url}
-        data_json = json.dumps(data)
-        post_url = f"https://chrome.browserless.io/content?token={brwoserless_api_key}"
-        response = requests.post(post_url, headers=headers, data=data_json)
-        
-        # If request failed, return appropriate message
-        if response.status_code != 200:
-            print(f"HTTP request failed with status code {response.status_code}")
-            return
+    # Convert Python object to JSON string
+    data_json = json.dumps(data)
 
-        # Extract text using BeautifulSoup
-        soup = BeautifulSoup(response.text, 'html.parser')
+    # Send the POST request
+    post_url = f"https://chrome.browserless.io/content?token={brwoserless_api_key}"
+    response = requests.post(post_url, headers=headers, data=data_json)
+
+    # Check the response status code
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, "html.parser")
         text = soup.get_text()
+        print("CONTENTTTTTT:", text)
 
-    # Print and summarize (if needed) the extracted content
-    print("CONTENTTTTTT:", text)
-    if len(text) > 1:
-        output = summary(objective, text)
-        return output
+        if len(text) > 10000:
+            output = summary(objective, text)
+            return output
+        else:
+            return text
     else:
-        return text
+        print(f"HTTP request failed with status code {response.status_code}")
 
 
 def summary(objective, content):
-    llm = ChatOpenAI(temperature=0, model="gpt-4")
+    llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-16k-0613")
 
     text_splitter = RecursiveCharacterTextSplitter(
         separators=["\n\n", "\n"], chunk_size=10000, chunk_overlap=500)
@@ -138,7 +127,6 @@ class ScrapeWebsiteTool(BaseTool):
 
     def _arun(self, url: str):
         raise NotImplementedError("error here")
-
 
 
 # 3. Create langchain agent with the tools above
@@ -184,20 +172,37 @@ agent = initialize_agent(
 
 
 # 4. Use streamlit to create a web app
-def main():
-    st.set_page_config(page_title="815 Gold Financier", page_icon=":bird:")
+# def main():
+#     st.set_page_config(page_title="AI research agent", page_icon=":bird:")
 
-    st.header("815 Gold Financier :bird:")
-    query = st.text_input("Research goal")
+#     st.header("AI research agent :bird:")
+#     query = st.text_input("Research goal")
 
-    if query:
-        st.write("Doing research for ", query)
+#     if query:
+#         st.write("Doing research for ", query)
 
-        result = agent({"input": query})
+#         result = agent({"input": query})
 
-        st.info(result['output'])
+#         st.info(result['output'])
 
-if __name__ == '__main__':
-    main()
+
+# if __name__ == '__main__':
+#     main()
+
+
+# 5. Set this as an API endpoint via FastAPI
+app = FastAPI()
+
+
+class Query(BaseModel):
+    query: str
+
+
+@app.post("/")
+def researchAgent(query: Query):
+    query = query.query
+    content = agent({"input": query})
+    actual_content = content['output']
+    return actual_content
 
 
